@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Quiz Master</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for a dark, tech-inspired look */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* GitHub Dark Mode background */
+            color: #c9d1d9; /* Light text */
+        }
+        .card {
+            background-color: #161c22; /* Slightly lighter surface for cards */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+        }
+        .score-highlight {
+            transition: all 0.3s ease;
+        }
+        .correct-answer {
+            background-color: #10b981; /* Green for correct */
+            color: white;
+            animation: bounceIn 0.5s;
+        }
+        .incorrect-answer {
+            background-color: #ef4444; /* Red for incorrect */
+            color: white;
+            animation: shake 0.5s;
+        }
+        /* --- Selected Option Highlight --- */
+        .option-selected {
+            background-color: #065f46 !important; /* Tailwind's dark green 800/900 */
+            border-color: #10b981 !important; /* Tailwind's bright green 500 */
+        }
+        /* ------------------------------------- */
+        @keyframes bounceIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); }
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+
+        /* --- Custom Radio Dot Styles --- */
+        .radio-indicator {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .radio-indicator::after {
+            content: '';
+            position: absolute;
+            width: 100%; 
+            height: 100%;
+            border-radius: 50%;
+            background-color: #38bdf8; /* Blue dot color */
+            transition: all 0.2s ease-out;
+            transform: scale(0);
+        }
+
+        .peer:checked + label .radio-indicator::after {
+            transform: scale(0.6);
+        }
+
+        /* Spinner for loading state */
+        .loader {
+            border-top-color: #3498db;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        @-webkit-keyframes spinner {
+            0% { -webkit-transform: rotate(0deg); }
+            100% { -webkit-transform: rotate(360deg); }
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8">
+
+    <!-- Tailwind Config for Inter font -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+
+    <header class="text-center mb-8">
+        <h1 class="text-5xl sm:text-6xl font-extrabold text-teal-400 mb-2">
+            Python Quiz Master
+        </h1>
+    </header>
+
+    <main class="max-w-7xl mx-auto grid lg:grid-cols-3 gap-8">
+
+        <!-- Scoreboard / Player List (Always visible) -->
+        <div id="scoreboard" class="lg:col-span-1 card rounded-xl p-4 h-fit sticky top-4">
+            <h2 class="text-2xl font-bold mb-4 border-b border-gray-700 pb-2 text-teal-300">Scoreboard</h2>
+            <div id="player-list" class="space-y-3">
+                <!-- Player items will be rendered here -->
+                <p class="text-gray-500 italic" id="empty-players-msg">Game initializing...</p>
+            </div>
+        </div>
+
+        <!-- Main Content Area (Setup / Quiz / Results) -->
+        <div class="lg:col-span-2 card rounded-xl p-6 sm:p-8">
+            <div id="loading-view" class="text-center py-20">
+                 <div class="loader ease-linear rounded-full border-8 border-gray-700 h-24 w-24 mx-auto mb-4"></div>
+                 <p class="text-xl text-gray-400">Connecting to Pythonic Battleground...</p>
+                 <p id="error-message" class="text-red-400 mt-4 hidden"></p>
+            </div>
+
+            <div id="session-view" class="hidden">
+                <h2 class="text-3xl font-semibold mb-6 text-yellow-400">1. Setup Your Session</h2>
+                
+                <p class="text-sm italic text-gray-500 mb-4">Your User ID: <span id="local-user-id" class="font-mono text-xs bg-gray-700 px-2 py-1 rounded">...</span></p>
+
+                <!-- Game Join/Create Block -->
+                <div id="game-selection-area" class="space-y-6">
+                    <!-- Join Game -->
+                    <div class="p-6 rounded-xl border border-gray-700">
+                        <h3 class="text-xl font-bold mb-3 text-teal-300">Join Existing Game</h3>
+                        <div class="flex gap-4">
+                            <input type="text" id="join-game-id-input" placeholder="Enter Game ID from host..."
+                                   class="flex-grow p-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-400 outline-none uppercase"
+                                   maxlength="8">
+                            <button id="join-game-btn" onclick="joinGame()"
+                                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200">
+                                Join
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Create Game -->
+                    <div class="p-6 rounded-xl border border-gray-700">
+                        <h3 class="text-xl font-bold mb-3 text-yellow-300">Create New Game (Host)</h3>
+                        <p class="text-gray-400 mb-4">You will generate a unique Game ID for others to join.</p>
+                        <button id="create-game-btn" onclick="createGame()"
+                                class="w-full bg-yellow-600 hover:bg-yellow-700 text-gray-900 font-extrabold py-3 rounded-lg transition duration-200">
+                            Create Game
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Host/Player Setup Area (Shown after joining/creating) -->
+                <div id="setup-view" class="hidden mt-8">
+                    <h3 id="current-game-id-display" class="text-xl font-bold mb-4 bg-gray-800 p-3 rounded-lg text-center"></h3>
+                    
+                    <div id="player-input-area" class="flex flex-col sm:flex-row gap-4 mb-6">
+                        <input type="text" id="player-name-input" placeholder="Enter your name..."
+                               class="flex-grow p-3 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-2 focus:ring-teal-400 outline-none"
+                               maxlength="20">
+                        <button id="add-player-btn" onclick="addPlayer()" disabled
+                                class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 opacity-50">
+                            Join Team
+                        </button>
+                    </div>
+
+                    <div id="setup-player-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                        <!-- Added players will show up here -->
+                    </div>
+
+                    <button id="start-quiz-btn" onclick="startQuiz()" disabled
+                            class="w-full bg-yellow-600 hover:bg-yellow-700 text-gray-900 font-extrabold py-4 rounded-xl transition duration-200 opacity-50 cursor-not-allowed text-lg">
+                        Start Round 1 (Host Only)
+                    </button>
+                    <p id="host-only-msg" class="text-center text-sm italic text-gray-500 mt-2 hidden">Only the game host can start the quiz.</p>
+                </div>
+
+            </div>
+
+            <div id="quiz-view" class="hidden">
+                <div id="quiz-header" class="mb-6 pb-4 border-b border-gray-700">
+                    <h2 id="round-title" class="text-2xl font-bold text-teal-300"></h2>
+                    <p class="text-gray-400">
+                        Question <span id="question-number"></span> of <span id="total-questions"></span>
+                    </p>
+                    <p class="text-xl font-medium mt-2">
+                        <span id="current-turn-label" class="text-yellow-400 font-bold"></span>'s Turn
+                    </p>
+                </div>
+
+                <div id="question-container" class="mb-8 p-4 card rounded-lg">
+                    <p id="question-text" class="text-xl font-semibold mb-6 text-white"></p>
+                    <div id="options-container" class="space-y-3">
+                        <!-- Options will be rendered here -->
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center">
+                    <p id="feedback-message" class="text-lg font-medium"></p>
+                    <button id="submit-btn" onclick="submitAnswer()" disabled
+                            class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-8 rounded-lg transition duration-200 opacity-50 cursor-not-allowed">
+                        Submit & Next
+                    </button>
+                </div>
+            </div>
+
+            <div id="results-view" class="hidden text-center py-10">
+                <h2 class="text-4xl font-extrabold text-green-400 mb-6">Quiz Complete!</h2>
+                <p class="text-xl mb-8">Congratulations to all participants!</p>
+                
+                <div id="final-scores" class="space-y-4 max-w-md mx-auto">
+                    <!-- Final ranked scores will be shown here -->
+                </div>
+
+                <button onclick="window.location.reload()"
+                        class="mt-10 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition duration-200 text-lg">
+                    Start a New Quiz
+                </button>
+            </div>
+
+        </div>
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, runTransaction, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Check if we are running in an environment without the required config (like XAMPP)
+        const isLocalhostWithoutConfig = Object.keys(firebaseConfig).length === 0;
+        
+        // Firebase Instances
+        let app = null, db = null, auth = null; // Initialize as null
+        let currentUserId = null;
+        let gameId = null;
+        let isHost = false;
+        let localPlayerName = '';
+        let unsubscribeSnapshot = null;
+        
+        // --- GAME STATE (MIRRORED FROM FIRESTORE) ---
+        let gameData = {
+            status: 'SETUP', // 'SETUP', 'QUIZ', 'RESULTS'
+            hostId: null,
+            players: [], // {id, name, score, pokemonImage}
+            currentRoundIndex: 0,
+            currentQuestionIndex: 0,
+            currentPlayerId: null, // Stores the ID of the current player whose turn it is
+        };
+
+        // --- CONSTANTS ---
+        const POKEMON_IDS = [1, 4, 7, 25, 52, 94, 133, 150, 143, 6, 35, 39, 54, 63, 151];
+        const QUESTIONS = [
+            {
+                round: "Basic Theory (Fundamentals)",
+                questions: [
+                    { q: "Which of the following data types is immutable in Python?", options: ["List", "Dictionary", "Set", "Tuple"], answer: "Tuple" },
+                    { q: "What is the correct way to open a file named 'data.txt' for writing?", options: ["open('data.txt', 'r')", "open('data.txt', 'w')", "file.open('data.txt')", "open(file='data.txt')"], answer: "open('data.txt', 'w')" },
+                    { q: "What does the 'pass' statement do in Python?", options: ["It skips the execution of the current loop iteration.", "It is used to define an empty block of code.", "It is used to exit a function.", "It throws an exception."], answer: "It is used to define an empty block of code." },
+                ]
+            },
+            {
+                round: "Functions and Modules",
+                questions: [
+                    { q: "What is a 'lambda' function in Python?", options: ["A function with no arguments.", "An anonymous inline function defined with one expression.", "A function that can call itself recursively.", "A function defined inside another function."], answer: "An anonymous inline function defined with one expression" },
+                    { q: "What keyword is used to bring functionality from another Python file (module)?", options: ["include", "use", "require", "import"], answer: "import" },
+                    { q: "What is the purpose of the `__init__` method in a Python class?", options: ["To delete an object.", "To initialize the main function.", "To define static methods.", "To initialize new objects (the constructor)."], answer: "To initialize new objects (the constructor)." },
+                ]
+            },
+            {
+                round: "Algorithms and Advanced Concepts",
+                questions: [
+                    { q: "Which data structure operates on a 'Last-In, First-Out' (LIFO) principle?", options: ["Queue", "List", "Stack", "Tuple"], answer: "Stack" },
+                    { q: "What is a 'generator' in Python?", options: ["A function that generates random numbers.", "A function that uses `yield` to return an iterable value one at a time.", "A class that can only be instantiated once.", "A built-in module for file manipulation."], answer: "A function that uses `yield` to return an iterable value one at a time." },
+                    { q: "The worst-case time complexity for searching an element in a balanced Binary Search Tree (BST) is?", options: ["O(n)", "O(log n)", "O(1)", "O(n log n)"], answer: "O(log n)" },
+                ]
+            }
+        ];
+
+        // --- DOM REFERENCES ---
+        const loadingView = document.getElementById('loading-view');
+        const sessionView = document.getElementById('session-view');
+        const setupView = document.getElementById('setup-view');
+        const quizView = document.getElementById('quiz-view');
+        const resultsView = document.getElementById('results-view');
+        const errorMessageEl = document.getElementById('error-message');
+
+        const localUserIdEl = document.getElementById('local-user-id');
+        const joinGameIdInput = document.getElementById('join-game-id-input');
+        const joinGameBtn = document.getElementById('join-game-btn');
+        const createGameBtn = document.getElementById('create-game-btn');
+        const currentGameIdDisplay = document.getElementById('current-game-id-display');
+
+        const playerNameInput = document.getElementById('player-name-input');
+        const addPlayerBtn = document.getElementById('add-player-btn');
+        const startQuizBtn = document.getElementById('start-quiz-btn');
+        const hostOnlyMsg = document.getElementById('host-only-msg');
+
+        const playerList = document.getElementById('player-list');
+        const setupPlayerList = document.getElementById('setup-player-list');
+        const roundTitle = document.getElementById('round-title');
+        const questionNumber = document.getElementById('question-number');
+        const totalQuestions = document.getElementById('total-questions');
+        const currentTurnLabel = document.getElementById('current-turn-label');
+        const questionText = document.getElementById('question-text');
+        const optionsContainer = document.getElementById('options-container');
+        const submitBtn = document.getElementById('submit-btn');
+        const feedbackMessage = document.getElementById('feedback-message');
+        const finalScoresContainer = document.getElementById('final-scores');
+        const emptyPlayersMsg = document.getElementById('empty-players-msg');
+
+        // --- UTILITIES ---
+
+        function showStatus(message, isError = false) {
+            errorMessageEl.textContent = message;
+            errorMessageEl.classList.toggle('text-red-400', isError);
+            errorMessageEl.classList.toggle('text-green-400', !isError && message);
+            errorMessageEl.classList.remove('hidden');
+            if (!message) errorMessageEl.classList.add('hidden');
+            console.log(isError ? 'ERROR: ' + message : 'STATUS: ' + message);
+        }
+
+        function generateGameId() {
+            // Generate a simple 6-character uppercase ID
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
+        function getRandomPokemonImage() {
+            const id = POKEMON_IDS[Math.floor(Math.random() * POKEMON_IDS.length)];
+            return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
+        }
+
+        // --- FIRESTORE FUNCTIONS (Conditional stubbing for XAMPP) ---
+
+        function getGameDocRef(id) {
+            if (!db) {
+                showStatus("Error: Firestore not initialized. Running in Demo Mode.", true);
+                return null;
+            }
+            // Path: /artifacts/{appId}/public/data/quizzes/{gameId}
+            return doc(db, 'artifacts', appId, 'public', 'data', 'quizzes', id);
+        }
+
+        async function createGame() {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot create a game without Firebase credentials. Enter Demo Mode or use a live link.', true);
+            }
+            // ... (Rest of original createGame logic remains the same)
+            if (gameId) return showStatus('Already in a game session.', true);
+
+            const newGameId = generateGameId();
+            const initialData = {
+                status: 'SETUP',
+                hostId: currentUserId,
+                players: [],
+                currentRoundIndex: 0,
+                currentQuestionIndex: 0,
+                currentPlayerId: null,
+            };
+
+            for (let i = 0; i < 3; i++) {
+                try {
+                    const docRef = getGameDocRef(newGameId);
+                    await setDoc(docRef, initialData);
+                    gameId = newGameId;
+                    isHost = true;
+                    subscribeToGame();
+                    return;
+                } catch (error) {
+                    console.warn(`Attempt ${i + 1} failed to create game:`, error);
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+                }
+            }
+            showStatus(`Failed to create game after multiple attempts.`, true);
+        }
+
+        async function joinGame() {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot join a game without Firebase credentials. Enter Demo Mode or use a live link.', true);
+            }
+            // ... (Rest of original joinGame logic remains the same)
+            if (gameId) return showStatus('Already in a game session.', true);
+            
+            const inputId = joinGameIdInput.value.trim().toUpperCase();
+            if (!inputId) return showStatus('Please enter a Game ID.', false);
+
+            for (let i = 0; i < 3; i++) {
+                try {
+                    const docRef = getGameDocRef(inputId);
+                    const docSnap = await getDoc(docRef);
+
+                    if (docSnap.exists() && docSnap.data().status !== 'RESULTS') {
+                        gameId = inputId;
+                        isHost = docSnap.data().hostId === currentUserId;
+                        subscribeToGame();
+                        return;
+                    } else if (docSnap.exists() && docSnap.data().status === 'RESULTS') {
+                        showStatus('Game has already finished.', true);
+                        return;
+                    } else {
+                        showStatus('Game not found or invalid ID.', true);
+                        return;
+                    }
+                } catch (error) {
+                    console.warn(`Attempt ${i + 1} failed to join game:`, error);
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+                }
+            }
+            showStatus(`Failed to join game after multiple attempts.`, true);
+        }
+
+        function subscribeToGame() {
+            if (isLocalhostWithoutConfig) {
+                 return showStatus('Real-time data disabled. Game features are read-only.', true);
+            }
+            // ... (Rest of original subscribeToGame logic remains the same)
+            if (unsubscribeSnapshot) unsubscribeSnapshot();
+
+            const docRef = getGameDocRef(gameId);
+
+            unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    gameData = docSnap.data();
+                    renderGame();
+                } else {
+                    unsubscribeSnapshot = null;
+                    gameId = null;
+                    isHost = false;
+                    gameData.players = [];
+                    renderGame();
+                    showStatus('Game session ended by host.', true);
+                }
+            }, (error) => {
+                console.error("Snapshot error:", error);
+                showStatus(`Real-time update error: ${error.message}`, true);
+            });
+        }
+
+        async function updateGame(updates) {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot update game state without Firebase connection.', true);
+            }
+            // ... (Rest of original updateGame logic remains the same)
+            if (!gameId) return;
+            const docRef = getGameDocRef(gameId);
+
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await setDoc(docRef, updates, { merge: true });
+                    return;
+                } catch (error) {
+                    console.warn(`Attempt ${i + 1} failed to update game:`, error);
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+                }
+            }
+            showStatus("Failed to sync game state after multiple attempts.", true);
+        }
+
+        // --- GAME LOGIC ---
+        // (addPlayer, startQuiz, submitAnswer remain the same but call the updated Firebase functions)
+
+        function addPlayer() {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot add player without Firebase connection.', true);
+            }
+
+            const name = playerNameInput.value.trim();
+            if (!name) return showStatus('Please enter a name!', false);
+            const isAlreadyInGame = gameData.players.some(p => p.id === currentUserId);
+            
+            if (isAlreadyInGame) {
+                showStatus(`You are already in the game as ${localPlayerName}!`, false);
+                return;
+            }
+
+            if (gameData.players.length >= 10) {
+                 return showStatus('Maximum 10 players allowed.', true);
+            }
+
+            localPlayerName = name;
+
+            const newPlayer = {
+                id: currentUserId,
+                name: name,
+                score: 0,
+                pokemonImage: getRandomPokemonImage()
+            };
+
+            const gameRef = getGameDocRef(gameId);
+
+            runTransaction(db, async (transaction) => {
+                const doc = await transaction.get(gameRef);
+                if (!doc.exists()) {
+                    throw "Document does not exist!";
+                }
+                
+                const players = doc.data().players || [];
+                const playerExists = players.some(p => p.id === currentUserId);
+                
+                if (!playerExists) {
+                    players.push(newPlayer);
+                    transaction.update(gameRef, { players: players });
+                }
+            }).then(() => {
+                playerNameInput.disabled = true;
+                addPlayerBtn.disabled = true;
+                addPlayerBtn.classList.add('opacity-50');
+                showStatus(`Successfully joined the team as ${name}!`, false);
+            }).catch((error) => {
+                console.error("Transaction failed: ", error);
+                showStatus("Failed to join the game. Try refreshing.", true);
+            });
+        }
+
+        function startQuiz() {
+            if (!isHost) return showStatus('Only the host can start the quiz.', true);
+            if (gameData.players.length === 0) return showStatus('Need at least one player to start.', false);
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot start quiz without Firebase connection.', true);
+            }
+
+            const firstPlayerId = gameData.players[0].id;
+            
+            updateGame({
+                status: 'QUIZ',
+                currentPlayerId: firstPlayerId,
+                currentRoundIndex: 0,
+                currentQuestionIndex: 0
+            });
+        }
+
+        async function submitAnswer() {
+            const selectedOption = document.querySelector('input[name="quiz-option"]:checked');
+            if (!selectedOption) {
+                feedbackMessage.textContent = 'Please select an answer!';
+                feedbackMessage.className = 'text-lg font-medium text-red-400';
+                return;
+            }
+            
+            if (isLocalhostWithoutConfig) {
+                // In demo mode, we can still process the answer client-side for feedback
+                const currentQuestion = QUESTIONS[gameData.currentRoundIndex].questions[gameData.currentQuestionIndex];
+                const answerCorrect = selectedOption.value === currentQuestion.answer;
+                
+                if (answerCorrect) {
+                     feedbackMessage.textContent = 'Correct! (Demo Mode: Score not saved)';
+                     feedbackMessage.className = 'text-lg font-medium text-green-400';
+                } else {
+                     feedbackMessage.textContent = `Incorrect. The answer was: ${currentQuestion.answer}`;
+                     feedbackMessage.className = 'text-lg font-medium text-red-400';
+                }
+                // Stop here in local mode, prevent crash on transaction
+                submitBtn.disabled = true;
+                submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                return;
+            }
+
+
+            submitBtn.disabled = true;
+
+            const currentQuestion = QUESTIONS[gameData.currentRoundIndex].questions[gameData.currentQuestionIndex];
+            const answerCorrect = selectedOption.value === currentQuestion.answer;
+            
+            const gameRef = getGameDocRef(gameId);
+
+            runTransaction(db, async (transaction) => {
+                const doc = await transaction.get(gameRef);
+                if (!doc.exists()) {
+                    throw new Error("Document does not exist!");
+                }
+                
+                let data = doc.data();
+                let players = data.players || [];
+                let playerIndex = players.findIndex(p => p.id === currentUserId);
+
+                if (playerIndex === -1 || data.currentPlayerId !== currentUserId) {
+                    throw new Error("Player ID mismatch or not their turn.");
+                }
+
+                if (answerCorrect) {
+                    players[playerIndex].score += 10;
+                }
+
+                let nextPlayerIndex = (data.players.findIndex(p => p.id === data.currentPlayerId) + 1) % players.length;
+                let nextPlayerId = players[nextPlayerIndex].id;
+                let nextQuestionIndex = data.currentQuestionIndex;
+                let nextRoundIndex = data.currentRoundIndex;
+                let nextStatus = data.status;
+
+                if (nextPlayerIndex === (data.currentQuestionIndex % players.length)) {
+                    nextQuestionIndex++;
+
+                    if (nextQuestionIndex >= QUESTIONS[data.currentRoundIndex].questions.length) {
+                        nextRoundIndex++;
+                        nextQuestionIndex = 0;
+
+                        if (nextRoundIndex >= QUESTIONS.length) {
+                            nextStatus = 'RESULTS';
+                            nextRoundIndex = QUESTIONS.length - 1; 
+                        }
+                    }
+                }
+
+                transaction.update(gameRef, {
+                    players: players,
+                    currentPlayerId: nextPlayerId,
+                    currentQuestionIndex: nextQuestionIndex,
+                    currentRoundIndex: nextRoundIndex,
+                    status: nextStatus
+                });
+            }).then(() => {
+                // Transaction successful - UI will refresh via onSnapshot
+            }).catch((error) => {
+                console.error("Transaction failed: ", error);
+                showStatus("Failed to submit answer due to network issue or turn error.", true);
+                submitBtn.disabled = false;
+            });
+        }
+        
+        function handleOptionClick(optionId, optionEl, isMyTurn) {
+            if (!isMyTurn) return;
+
+            // 1. Deselect all other options visually
+            optionsContainer.querySelectorAll('.option-container').forEach(el => {
+                el.classList.remove('option-selected');
+                // Restore default colors
+                if (!el.classList.contains('bg-gray-900')) {
+                    el.classList.add('bg-gray-800', 'hover:bg-gray-700');
+                }
+            });
+
+            // 2. Select the current option visually
+            optionEl.classList.add('option-selected');
+            optionEl.classList.remove('bg-gray-800', 'hover:bg-gray-700');
+            
+            // 3. Mark the radio button as checked
+            document.getElementById(optionId).checked = true;
+
+            // 4. Enable the submit button
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
+
+        // --- RENDER FUNCTIONS (Omitted for brevity, kept the same) ---
+
+        function renderScoreboard() {
+            playerList.innerHTML = '';
+            const currentPlayerTurn = gameData.players.find(p => p.id === gameData.currentPlayerId);
+            
+            if (gameData.players.length === 0) {
+                emptyPlayersMsg.textContent = 'Join the game to appear here!';
+                emptyPlayersMsg.classList.remove('hidden');
+                return;
+            }
+            emptyPlayersMsg.classList.add('hidden');
+
+            const sortedPlayers = [...gameData.players].sort((a, b) => b.score - a.score);
+
+            sortedPlayers.forEach((player) => {
+                const isCurrentPlayer = currentPlayerTurn && player.id === currentPlayerTurn.id;
+                const isLocalUser = player.id === currentUserId;
+
+                const playerEl = document.createElement('div');
+                playerEl.className = `flex items-center justify-between p-3 rounded-lg transition duration-300 ${isCurrentPlayer ? 'bg-teal-900 border-2 border-teal-400 score-highlight' : 'bg-gray-800 border border-gray-700'}`;
+
+                playerEl.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <img src="${player.pokemonImage}" alt="${player.name}'s Pokemon" class="w-10 h-10 object-contain p-1 rounded-full bg-gray-600">
+                        <span class="font-medium ${isCurrentPlayer ? 'text-white' : 'text-gray-200'}">${player.name} ${isLocalUser ? '(You)' : ''}</span>
+                    </div>
+                    <span class="text-xl font-bold text-yellow-300">${player.score}</span>
+                `;
+                playerList.appendChild(playerEl);
+            });
+        }
+
+        function renderSetupView() {
+            sessionView.classList.remove('hidden');
+            setupView.classList.remove('hidden');
+            quizView.classList.add('hidden');
+            resultsView.classList.add('hidden');
+            loadingView.classList.add('hidden');
+
+            // Set up UI based on host status
+            currentGameIdDisplay.innerHTML = `<span class="text-yellow-400">${isHost ? 'HOST' : 'PLAYER'}</span> - Game ID: <span class="font-mono text-white">${gameId}</span> (Share this to join!)`;
+            
+            // Host controls
+            startQuizBtn.classList.toggle('hidden', !isHost);
+            hostOnlyMsg.classList.toggle('hidden', isHost);
+            
+            // Player join logic
+            const playerJoined = gameData.players.some(p => p.id === currentUserId);
+            playerNameInput.disabled = playerJoined;
+            addPlayerBtn.disabled = playerJoined || isLocalhostWithoutConfig;
+            addPlayerBtn.classList.toggle('opacity-50', playerJoined || isLocalhostWithoutConfig);
+            if (isLocalhostWithoutConfig) {
+                playerNameInput.placeholder = "Full multiplayer disabled (No Firebase)";
+                playerNameInput.disabled = true;
+            }
+
+            if (!playerJoined && playerNameInput.value.trim().length > 0) {
+                 addPlayerBtn.disabled = false;
+                 addPlayerBtn.classList.remove('opacity-50');
+            }
+
+            // Host can start if > 0 players
+            startQuizBtn.disabled = !isHost || gameData.players.length === 0 || isLocalhostWithoutConfig;
+            startQuizBtn.classList.toggle('opacity-50', startQuizBtn.disabled);
+
+
+            // Render player list in setup
+            setupPlayerList.innerHTML = '';
+            gameData.players.forEach((player) => {
+                const playerEl = document.createElement('div');
+                playerEl.className = 'card p-4 rounded-lg flex items-center space-x-4';
+                playerEl.innerHTML = `
+                    <img src="${player.pokemonImage}" alt="${player.name}'s Pokemon" class="w-12 h-12 object-contain">
+                    <span class="text-lg font-semibold text-white">${player.name} ${player.id === currentUserId ? '(You)' : ''}</span>
+                    <span class="text-sm font-medium text-gray-400">${player.id === gameData.hostId ? '👑 Host' : ''}</span>
+                `;
+                setupPlayerList.appendChild(playerEl);
+            });
+        }
+
+        function renderQuizView() {
+            setupView.classList.add('hidden');
+            quizView.classList.remove('hidden');
+            resultsView.classList.add('hidden');
+            
+            const round = QUESTIONS[gameData.currentRoundIndex];
+            const currentQuestion = round.questions[gameData.currentQuestionIndex];
+            const totalRoundQuestions = round.questions.length;
+            const currentPlayer = gameData.players.find(p => p.id === gameData.currentPlayerId);
+            const isMyTurn = currentPlayer && currentPlayer.id === currentUserId;
+
+            // Reset state
+            feedbackMessage.textContent = '';
+            submitBtn.textContent = 'Submit & Next';
+
+            // Update Header
+            roundTitle.textContent = `Round ${gameData.currentRoundIndex + 1}: ${round.round}`;
+            questionNumber.textContent = gameData.currentQuestionIndex + 1;
+            totalQuestions.textContent = totalRoundQuestions;
+            currentTurnLabel.textContent = currentPlayer ? currentPlayer.name : 'Waiting...';
+
+            // Disable submit button on render until an option is selected
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            // Update Question
+            questionText.textContent = currentQuestion.q;
+            optionsContainer.innerHTML = '';
+
+            // Render Options
+            const shuffledOptions = [...currentQuestion.options].sort(() => Math.random() - 0.5);
+
+            shuffledOptions.forEach((option, index) => {
+                const optionId = `option-${index}`;
+                
+                // Add option-container class for easy lookup in handleOptionClick
+                const optionDiv = document.createElement('div');
+                optionDiv.className = `option-container flex items-center p-4 rounded-lg cursor-pointer transition duration-150 border border-gray-700 ${isMyTurn ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-900 cursor-not-allowed'}`;
+
+                optionDiv.innerHTML = `
+                    <input type="radio" id="${optionId}" name="quiz-option" value="${option}" class="hidden peer" ${!isMyTurn ? 'disabled' : ''}>
+                    <label for="${optionId}" class="flex items-center w-full text-lg font-medium cursor-pointer">
+                        <span class="radio-indicator w-5 h-5 inline-block mr-3 rounded-full border-2 border-teal-400 bg-gray-800 flex-shrink-0"></span>
+                        ${option}
+                    </label>
+                `;
+                
+                // Use the new click handler
+                optionDiv.onclick = () => {
+                    handleOptionClick(optionId, optionDiv, isMyTurn);
+                };
+                
+                optionsContainer.appendChild(optionDiv);
+            });
+            
+            if (!isMyTurn) {
+                feedbackMessage.textContent = `Waiting for ${currentPlayer.name} to submit their answer...`;
+                feedbackMessage.className = 'text-lg font-medium text-blue-400';
+            } else {
+                feedbackMessage.textContent = `It's your turn, ${currentPlayer.name}!`;
+                feedbackMessage.className = 'text-lg font-medium text-yellow-400';
+            }
+            
+            // Final check for localhost (to show an appropriate message)
+            if (isLocalhostWithoutConfig) {
+                 feedbackMessage.textContent += " (Demo Mode: Only local feedback, no score update)";
+            }
+        }
+
+        function renderResultsView() {
+            quizView.classList.add('hidden');
+            resultsView.classList.remove('hidden');
+
+            const sortedPlayers = [...gameData.players].sort((a, b) => b.score - a.score);
+            finalScoresContainer.innerHTML = '';
+            
+            sortedPlayers.forEach((player, index) => {
+                const rank = index + 1;
+                let rankColor = 'text-gray-400';
+                let rankIcon = '🏆';
+                if (rank === 1) {
+                    rankColor = 'text-yellow-400';
+                    rankIcon = '🥇';
+                } else if (rank === 2) {
+                    rankColor = 'text-gray-300';
+                    rankIcon = '🥈';
+                } else if (rank === 3) {
+                    rankColor = 'text-amber-600';
+                    rankIcon = '🥉';
+                }
+
+                const scoreEl = document.createElement('div');
+                scoreEl.className = 'card p-4 rounded-xl flex items-center justify-between transition duration-300 transform hover:scale-[1.02]';
+                scoreEl.innerHTML = `
+                    <div class="flex items-center space-x-4">
+                        <span class="text-3xl ${rankColor} font-extrabold">${rankIcon}</span>
+                        <img src="${player.pokemonImage}" alt="${player.name}'s Pokemon" class="w-12 h-12 object-contain p-1 rounded-full bg-gray-700">
+                        <span class="text-xl font-bold text-white">${player.name} ${player.id === currentUserId ? '(You)' : ''}</span>
+                    </div>
+                    <span class="text-3xl font-extrabold text-teal-400">${player.score}</span>
+                `;
+                finalScoresContainer.appendChild(scoreEl);
+            });
+        }
+
+        function renderGame() {
+            if (!gameId) {
+                loadingView.classList.add('hidden');
+                sessionView.classList.remove('hidden');
+                setupView.classList.add('hidden');
+                quizView.classList.add('hidden');
+                resultsView.classList.add('hidden');
+                document.getElementById('game-selection-area').classList.remove('hidden');
+            } else {
+                document.getElementById('game-selection-area').classList.add('hidden');
+                currentGameIdDisplay.parentElement.classList.remove('hidden');
+
+                if (gameData.status === 'SETUP') {
+                    renderSetupView();
+                } else if (gameData.status === 'QUIZ') {
+                    renderQuizView();
+                } else if (gameData.status === 'RESULTS') {
+                    renderResultsView();
+                }
+            }
+            renderScoreboard();
+        }
+
+        // --- INITIALIZATION ---
+
+        async function initializeFirebase() {
+            try {
+                if (!isLocalhostWithoutConfig) {
+                    setLogLevel('Debug');
+                    app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    currentUserId = auth.currentUser?.uid || crypto.randomUUID();
+                } else {
+                    // XAMPP/Localhost Fallback: No Firebase, just use a random ID
+                    currentUserId = crypto.randomUUID();
+                    showStatus('Firebase initialization skipped. Running in Demo Mode.', true);
+                }
+
+                localUserIdEl.textContent = currentUserId;
+                
+                // --- TEMPORARY DEMO MODE START (FOR PREVIEW/XAMPP) ---
+                // This simulates a game state so the UI loads correctly
+                gameId = 'DEMOQUIZ';
+                isHost = false; 
+                gameData.status = 'QUIZ'; 
+                gameData.hostId = 'mock-host-xyz';
+                gameData.players = [
+                    { id: 'mock-host-xyz', name: 'Quiz Host', score: 30, pokemonImage: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png' },
+                    { id: currentUserId, name: 'You (Demo)', score: 10, pokemonImage: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/7.png' },
+                    { id: 'mock-player-456', name: 'Rival Player', score: 20, pokemonImage: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/1.png' },
+                ];
+                gameData.currentPlayerId = currentUserId;
+                gameData.currentRoundIndex = 0;
+                gameData.currentQuestionIndex = 1; 
+                
+                // --- TEMPORARY DEMO MODE END ---
+
+                // Handle local player name input logic after auth
+                playerNameInput.addEventListener('input', () => {
+                    if (playerNameInput.value.trim().length > 0 && !gameData.players.some(p => p.id === currentUserId) && !isLocalhostWithoutConfig) {
+                        addPlayerBtn.disabled = false;
+                        addPlayerBtn.classList.remove('opacity-50');
+                    } else {
+                        addPlayerBtn.disabled = true;
+                        addPlayerBtn.classList.add('opacity-50');
+                    }
+                });
+
+                renderGame();
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                showStatus(`Initialization failed. Check console for details.`, true);
+            }
+        }
+
+        window.onload = initializeFirebase;
+    </script>
+</body>
+</html>

@@ -1,6 +1,9 @@
 <!DOCTYPE html>
-ame="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Python Quiz Master</title>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Quiz Master (Multiplayer Ready)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Custom styles for a dark, tech-inspired look */
@@ -10,37 +13,20 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
             color: #c9d1d9; /* Light text */
         }
         .card {
-            background-color: #161<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta nb22; /* Slightly lighter surface for cards */
+            background-color: #161c22; /* Slightly lighter surface for cards */
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
         }
         .score-highlight {
             transition: all 0.3s ease;
         }
-        .correct-answer {
-            background-color: #10b981; /* Green for correct */
-            color: white;
-            animation: bounceIn 0.5s;
+        /* --- Selected Option Highlight --- */
+        .option-selected {
+            background-color: #065f46 !important; /* Tailwind's dark green 800/900 */
+            border-color: #10b981 !important; /* Tailwind's bright green 500 */
         }
-        .incorrect-answer {
-            background-color: #ef4444; /* Red for incorrect */
-            color: white;
-            animation: shake 0.5s;
-        }
-        @keyframes bounceIn {
-            0% { transform: scale(0.8); opacity: 0; }
-            50% { transform: scale(1.1); opacity: 1; }
-            100% { transform: scale(1); }
-        }
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            20%, 60% { transform: translateX(-5px); }
-            40%, 80% { transform: translateX(5px); }
-        }
-
-        /* --- Custom Radio Dot Styles --- */
+        /* ------------------------------------- */
+        
+        /* Custom Radio Dot Styles */
         .radio-indicator {
             position: relative;
             display: inline-flex;
@@ -99,6 +85,7 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         <h1 class="text-5xl sm:text-6xl font-extrabold text-teal-400 mb-2">
             Python Quiz Master
         </h1>
+        <p id="mode-display" class="text-yellow-500 font-semibold"></p>
     </header>
 
     <main class="max-w-7xl mx-auto grid lg:grid-cols-3 gap-8">
@@ -224,17 +211,39 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
     </main>
 
     <script type="module">
+        // --- Firebase SDK Imports ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, collection, runTransaction, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // IMPORTANT: Global variables provided by the Canvas environment
+        /*
+         * ====================================================================
+         * >>> IMPORTANT: PASTE YOUR FIREBASE CONFIGURATION HERE <<<
+         * * For the multiplayer features (Create/Join Game, Scoreboard) to work 
+         * on GitHub Pages or any hosting service, you must replace the empty 
+         * object below with YOUR Firebase project's config object.
+         * * Example:
+         * const userProvidedFirebaseConfig = {
+         * apiKey: "AIzaSy...",
+         * authDomain: "your-project.firebaseapp.com",
+         * projectId: "your-project-id",
+         * // ... other keys
+         * };
+         * ====================================================================
+        */
+        const userProvidedFirebaseConfig = {}; 
+        
+        // Canvas provided variables (will be empty on GH Pages)
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
+        // Determine the actual config to use: Canvas config (if present) or User's config.
+        const firebaseConfig = userProvidedFirebaseConfig;
+        
+        const isLocalhostWithoutConfig = Object.keys(firebaseConfig).length === 0;
+        
         // Firebase Instances
-        let app, db, auth;
+        let app = null, db = null, auth = null; 
         let currentUserId = null;
         let gameId = null;
         let isHost = false;
@@ -248,11 +257,11 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
             players: [], // {id, name, score, pokemonImage}
             currentRoundIndex: 0,
             currentQuestionIndex: 0,
-            currentPlayerId: null, // Stores the ID of the current player whose turn it is
+            currentPlayerId: null, 
         };
 
         // --- CONSTANTS ---
-        const POKEMON_IDS = [1, 4, 7, 25, 52, 94, 133, 150, 143, 6];
+        const POKEMON_IDS = [1, 4, 7, 25, 52, 94, 133, 150, 143, 6, 35, 39, 54, 63, 151];
         const QUESTIONS = [
             {
                 round: "Basic Theory (Fundamentals)",
@@ -287,6 +296,7 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         const quizView = document.getElementById('quiz-view');
         const resultsView = document.getElementById('results-view');
         const errorMessageEl = document.getElementById('error-message');
+        const modeDisplayEl = document.getElementById('mode-display');
 
         const localUserIdEl = document.getElementById('local-user-id');
         const joinGameIdInput = document.getElementById('join-game-id-input');
@@ -309,7 +319,6 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         const optionsContainer = document.getElementById('options-container');
         const submitBtn = document.getElementById('submit-btn');
         const feedbackMessage = document.getElementById('feedback-message');
-        const finalScoresContainer = document.getElementById('final-scores');
         const emptyPlayersMsg = document.getElementById('empty-players-msg');
 
         // --- UTILITIES ---
@@ -324,7 +333,6 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         }
 
         function generateGameId() {
-            // Generate a simple 6-character uppercase ID
             return Math.random().toString(36).substring(2, 8).toUpperCase();
         }
 
@@ -336,11 +344,17 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         // --- FIRESTORE FUNCTIONS ---
 
         function getGameDocRef(id) {
+            if (!db) {
+                return null;
+            }
             // Path: /artifacts/{appId}/public/data/quizzes/{gameId}
             return doc(db, 'artifacts', appId, 'public', 'data', 'quizzes', id);
         }
 
         async function createGame() {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Multiplayer disabled. Insert Firebase config to create a game.', true);
+            }
             if (gameId) return showStatus('Already in a game session.', true);
 
             const newGameId = generateGameId();
@@ -353,7 +367,6 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                 currentPlayerId: null,
             };
 
-            // Use simple retry logic for transaction/write failures
             for (let i = 0; i < 3; i++) {
                 try {
                     const docRef = getGameDocRef(newGameId);
@@ -361,22 +374,24 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                     gameId = newGameId;
                     isHost = true;
                     subscribeToGame();
-                    return; // Success
+                    return;
                 } catch (error) {
                     console.warn(`Attempt ${i + 1} failed to create game:`, error);
-                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000)); // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
                 }
             }
             showStatus(`Failed to create game after multiple attempts.`, true);
         }
 
         async function joinGame() {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Multiplayer disabled. Insert Firebase config to join a game.', true);
+            }
             if (gameId) return showStatus('Already in a game session.', true);
             
             const inputId = joinGameIdInput.value.trim().toUpperCase();
             if (!inputId) return showStatus('Please enter a Game ID.', false);
 
-            // Use simple retry logic for read/join failures
             for (let i = 0; i < 3; i++) {
                 try {
                     const docRef = getGameDocRef(inputId);
@@ -384,9 +399,9 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
 
                     if (docSnap.exists() && docSnap.data().status !== 'RESULTS') {
                         gameId = inputId;
-                        isHost = docSnap.data().hostId === currentUserId; // Set host status
+                        isHost = docSnap.data().hostId === currentUserId;
                         subscribeToGame();
-                        return; // Success
+                        return;
                     } else if (docSnap.exists() && docSnap.data().status === 'RESULTS') {
                         showStatus('Game has already finished.', true);
                         return;
@@ -396,27 +411,29 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                     }
                 } catch (error) {
                     console.warn(`Attempt ${i + 1} failed to join game:`, error);
-                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000)); // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
                 }
             }
             showStatus(`Failed to join game after multiple attempts.`, true);
         }
 
         function subscribeToGame() {
-            if (unsubscribeSnapshot) unsubscribeSnapshot(); // Clean up previous listener
+            if (isLocalhostWithoutConfig) {
+                 return; // No subscription in demo mode
+            }
+            if (unsubscribeSnapshot) unsubscribeSnapshot();
 
             const docRef = getGameDocRef(gameId);
 
             unsubscribeSnapshot = onSnapshot(docRef, (docSnap) => {
                 if (docSnap.exists()) {
                     gameData = docSnap.data();
-                    renderGame(); // Update UI based on new gameData
+                    renderGame();
                 } else {
-                    // Game was deleted or something went wrong
                     unsubscribeSnapshot = null;
                     gameId = null;
                     isHost = false;
-                    gameData.players = []; // Reset local state
+                    gameData.players = [];
                     renderGame();
                     showStatus('Game session ended by host.', true);
                 }
@@ -427,16 +444,19 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         }
 
         async function updateGame(updates) {
+            if (isLocalhostWithoutConfig) {
+                return; // Cannot update in demo mode
+            }
             if (!gameId) return;
             const docRef = getGameDocRef(gameId);
 
             for (let i = 0; i < 3; i++) {
                 try {
                     await setDoc(docRef, updates, { merge: true });
-                    return; // Success
+                    return;
                 } catch (error) {
                     console.warn(`Attempt ${i + 1} failed to update game:`, error);
-                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000)); // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
                 }
             }
             showStatus("Failed to sync game state after multiple attempts.", true);
@@ -445,10 +465,14 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         // --- GAME LOGIC ---
 
         function addPlayer() {
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot add player without Firebase connection.', true);
+            }
+
             const name = playerNameInput.value.trim();
             if (!name) return showStatus('Please enter a name!', false);
-            const isAlreadyInGame = gameData.players.some(p => p.id === currentUserId);
             
+            const isAlreadyInGame = gameData.players.some(p => p.id === currentUserId);
             if (isAlreadyInGame) {
                 showStatus(`You are already in the game as ${localPlayerName}!`, false);
                 return;
@@ -469,7 +493,6 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
 
             const gameRef = getGameDocRef(gameId);
 
-            // Use transaction to ensure player array update is safe
             runTransaction(db, async (transaction) => {
                 const doc = await transaction.get(gameRef);
                 if (!doc.exists()) {
@@ -484,7 +507,6 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                     transaction.update(gameRef, { players: players });
                 }
             }).then(() => {
-                // UI updates on success are handled by the onSnapshot listener, but we can update local fields
                 playerNameInput.disabled = true;
                 addPlayerBtn.disabled = true;
                 addPlayerBtn.classList.add('opacity-50');
@@ -498,8 +520,10 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         function startQuiz() {
             if (!isHost) return showStatus('Only the host can start the quiz.', true);
             if (gameData.players.length === 0) return showStatus('Need at least one player to start.', false);
+            if (isLocalhostWithoutConfig) {
+                return showStatus('Cannot start quiz without Firebase connection.', true);
+            }
 
-            // Set the initial current player to the first one in the list
             const firstPlayerId = gameData.players[0].id;
             
             updateGame({
@@ -517,12 +541,31 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                 feedbackMessage.className = 'text-lg font-medium text-red-400';
                 return;
             }
-
-            submitBtn.disabled = true;
-
+            
             const currentQuestion = QUESTIONS[gameData.currentRoundIndex].questions[gameData.currentQuestionIndex];
             const answerCorrect = selectedOption.value === currentQuestion.answer;
             
+            submitBtn.disabled = true;
+            
+            if (isLocalhostWithoutConfig) {
+                // Demo mode logic
+                if (answerCorrect) {
+                     feedbackMessage.textContent = 'Correct! (Demo Mode: Score not saved)';
+                     feedbackMessage.className = 'text-lg font-medium text-green-400';
+                } else {
+                     feedbackMessage.textContent = `Incorrect. The answer was: ${currentQuestion.answer} (Demo Mode)`;
+                     feedbackMessage.className = 'text-lg font-medium text-red-400';
+                }
+                // Simulate transition to next question in demo mode
+                // Note: The rest of the UI (turn tracking) will not work correctly in demo mode.
+                setTimeout(() => {
+                    alert('Demo Answer Submitted. Please refresh to reset the single question.');
+                }, 1000);
+                return;
+            }
+
+
+            // --- Multiplayer Logic ---
             const gameRef = getGameDocRef(gameId);
 
             runTransaction(db, async (transaction) => {
@@ -536,41 +579,35 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                 let playerIndex = players.findIndex(p => p.id === currentUserId);
 
                 if (playerIndex === -1 || data.currentPlayerId !== currentUserId) {
-                    throw new Error("Player ID mismatch or not their turn.");
+                    // This handles late answers or out-of-turn attempts
+                    throw new Error("Player ID mismatch or not their turn."); 
                 }
 
-                // 1. Update Score
                 if (answerCorrect) {
                     players[playerIndex].score += 10;
                 }
 
-                // 2. Advance Turn Logic
                 let nextPlayerIndex = (data.players.findIndex(p => p.id === data.currentPlayerId) + 1) % players.length;
                 let nextPlayerId = players[nextPlayerIndex].id;
                 let nextQuestionIndex = data.currentQuestionIndex;
                 let nextRoundIndex = data.currentRoundIndex;
                 let nextStatus = data.status;
 
-                // If the turn cycles back to the original start player of this question, advance question
-                // (currentQuestionIndex % players.length) gives the index of the player who STARTED this question
+                // Only move to next question when a full cycle of players have answered the current question
                 if (nextPlayerIndex === (data.currentQuestionIndex % players.length)) {
                     nextQuestionIndex++;
 
-                    // Check if the round is over
                     if (nextQuestionIndex >= QUESTIONS[data.currentRoundIndex].questions.length) {
                         nextRoundIndex++;
-                        nextQuestionIndex = 0; // Reset question index for the new round
+                        nextQuestionIndex = 0;
 
-                        // Check if the entire quiz is over
                         if (nextRoundIndex >= QUESTIONS.length) {
                             nextStatus = 'RESULTS';
-                            // Keep last round index for results view
                             nextRoundIndex = QUESTIONS.length - 1; 
                         }
                     }
                 }
 
-                // 3. Update Firestore
                 transaction.update(gameRef, {
                     players: players,
                     currentPlayerId: nextPlayerId,
@@ -579,13 +616,36 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                     status: nextStatus
                 });
             }).then(() => {
-                // Transaction successful - UI will refresh via onSnapshot
+                // The UI will update automatically via the onSnapshot listener
             }).catch((error) => {
                 console.error("Transaction failed: ", error);
                 showStatus("Failed to submit answer due to network issue or turn error.", true);
                 submitBtn.disabled = false;
+                submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             });
         }
+        
+        function handleOptionClick(optionId, optionEl, isMyTurn) {
+            if (!isMyTurn) return;
+
+            // 1. Deselect all other options visually
+            optionsContainer.querySelectorAll('.option-container').forEach(el => {
+                el.classList.remove('option-selected');
+                el.classList.add('bg-gray-800', 'hover:bg-gray-700');
+            });
+
+            // 2. Select the current option visually
+            optionEl.classList.add('option-selected');
+            optionEl.classList.remove('bg-gray-800', 'hover:bg-gray-700');
+            
+            // 3. Mark the radio button as checked
+            document.getElementById(optionId).checked = true;
+
+            // 4. Enable the submit button
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
 
         // --- RENDER FUNCTIONS ---
 
@@ -636,17 +696,20 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
             
             // Player join logic
             const playerJoined = gameData.players.some(p => p.id === currentUserId);
-            playerNameInput.disabled = playerJoined;
-            addPlayerBtn.disabled = playerJoined;
-            addPlayerBtn.classList.toggle('opacity-50', playerJoined);
+            playerNameInput.disabled = playerJoined || isLocalhostWithoutConfig;
+            addPlayerBtn.disabled = playerJoined || isLocalhostWithoutConfig;
+            addPlayerBtn.classList.toggle('opacity-50', playerJoined || isLocalhostWithoutConfig);
+            if (isLocalhostWithoutConfig) {
+                 playerNameInput.placeholder = "Multiplayer Disabled in Demo Mode";
+            }
 
-            if (!playerJoined && playerNameInput.value.trim().length > 0) {
+            if (!playerJoined && playerNameInput.value.trim().length > 0 && !isLocalhostWithoutConfig) {
                  addPlayerBtn.disabled = false;
                  addPlayerBtn.classList.remove('opacity-50');
             }
 
             // Host can start if > 0 players
-            startQuizBtn.disabled = !isHost || gameData.players.length === 0;
+            startQuizBtn.disabled = !isHost || gameData.players.length === 0 || isLocalhostWithoutConfig;
             startQuizBtn.classList.toggle('opacity-50', startQuizBtn.disabled);
 
 
@@ -685,10 +748,9 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
             totalQuestions.textContent = totalRoundQuestions;
             currentTurnLabel.textContent = currentPlayer ? currentPlayer.name : 'Waiting...';
 
-            // Enable/Disable submit button and interaction based on whose turn it is
-            submitBtn.disabled = !isMyTurn;
-            submitBtn.classList.toggle('opacity-50', !isMyTurn);
-            submitBtn.classList.toggle('cursor-not-allowed', !isMyTurn);
+            // Disable submit button on render until an option is selected
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
             
             // Update Question
             questionText.textContent = currentQuestion.q;
@@ -699,9 +761,10 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
 
             shuffledOptions.forEach((option, index) => {
                 const optionId = `option-${index}`;
+                
+                // Add option-container class for easy lookup in handleOptionClick
                 const optionDiv = document.createElement('div');
-                // Styling depends on whose turn it is
-                optionDiv.className = `flex items-center p-4 rounded-lg cursor-pointer transition duration-150 border border-gray-700 ${isMyTurn ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-900 cursor-not-allowed'}`;
+                optionDiv.className = `option-container flex items-center p-4 rounded-lg cursor-pointer transition duration-150 border border-gray-700 ${isMyTurn ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-900 cursor-not-allowed'}`;
 
                 optionDiv.innerHTML = `
                     <input type="radio" id="${optionId}" name="quiz-option" value="${option}" class="hidden peer" ${!isMyTurn ? 'disabled' : ''}>
@@ -710,14 +773,12 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                         ${option}
                     </label>
                 `;
+                
+                // Use the new click handler
                 optionDiv.onclick = () => {
-                    if (isMyTurn) {
-                        document.getElementById(optionId).checked = true;
-                        // Enable submit button when an option is selected
-                        submitBtn.disabled = false;
-                        submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                    }
+                    handleOptionClick(optionId, optionDiv, isMyTurn);
                 };
+                
                 optionsContainer.appendChild(optionDiv);
             });
             
@@ -728,6 +789,11 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                 feedbackMessage.textContent = `It's your turn, ${currentPlayer.name}!`;
                 feedbackMessage.className = 'text-lg font-medium text-yellow-400';
             }
+            
+            // Final check for localhost (to show an appropriate message)
+            if (isLocalhostWithoutConfig) {
+                 feedbackMessage.textContent += " (Demo Mode: Only local feedback, no score update)";
+            }
         }
 
         function renderResultsView() {
@@ -735,7 +801,7 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
             resultsView.classList.remove('hidden');
 
             const sortedPlayers = [...gameData.players].sort((a, b) => b.score - a.score);
-            finalScoresContainer.innerHTML = '';
+            document.getElementById('final-scores').innerHTML = '';
             
             sortedPlayers.forEach((player, index) => {
                 const rank = index + 1;
@@ -762,24 +828,25 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                     </div>
                     <span class="text-3xl font-extrabold text-teal-400">${player.score}</span>
                 `;
-                finalScoresContainer.appendChild(scoreEl);
+                document.getElementById('final-scores').appendChild(scoreEl);
             });
         }
 
         function renderGame() {
+            modeDisplayEl.textContent = isLocalhostWithoutConfig ? 'Running in DEMO MODE' : 'Running in MULTIPLAYER MODE';
+            modeDisplayEl.classList.toggle('text-yellow-500', isLocalhostWithoutConfig);
+            modeDisplayEl.classList.toggle('text-green-500', !isLocalhostWithoutConfig);
+
             if (!gameId) {
-                // Not joined/created a game yet
                 loadingView.classList.add('hidden');
                 sessionView.classList.remove('hidden');
                 setupView.classList.add('hidden');
                 quizView.classList.add('hidden');
                 resultsView.classList.add('hidden');
-                // Ensure join/create buttons are visible
                 document.getElementById('game-selection-area').classList.remove('hidden');
             } else {
-                // Joined/created a game. Hide selection screen.
                 document.getElementById('game-selection-area').classList.add('hidden');
-                currentGameIdDisplay.parentElement.classList.remove('hidden'); // Show setup details
+                currentGameIdDisplay.parentElement.classList.remove('hidden');
 
                 if (gameData.status === 'SETUP') {
                     renderSetupView();
@@ -795,25 +862,42 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
         // --- INITIALIZATION ---
 
         async function initializeFirebase() {
-            setLogLevel('Debug');
             try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
+                if (!isLocalhostWithoutConfig) {
+                    setLogLevel('Debug'); // Helpful for debugging on GitHub Pages console
+                    app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
 
-                // Authenticate user
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
+                    // Sign in anonymously for simple public access on GitHub Pages
                     await signInAnonymously(auth);
+                    currentUserId = auth.currentUser?.uid || crypto.randomUUID();
+
+                } else {
+                    // XAMPP/Localhost/GH Pages without config Fallback: DEMO MODE
+                    currentUserId = crypto.randomUUID();
+                    showStatus('Multiplayer disabled. Insert Firebase config for full functionality.', true);
+                    
+                    // Populate initial DEMO game data
+                    gameId = 'DEMOQUIZ';
+                    isHost = false; 
+                    gameData.status = 'QUIZ'; 
+                    gameData.hostId = 'mock-host-xyz';
+                    gameData.players = [
+                        { id: 'mock-host-xyz', name: 'Quiz Host', score: 30, pokemonImage: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png' },
+                        { id: currentUserId, name: 'You (Demo)', score: 10, pokemonImage: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/7.png' },
+                        { id: 'mock-player-456', name: 'Rival Player', score: 20, pokemonImage: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/1.png' },
+                    ];
+                    gameData.currentPlayerId = currentUserId;
+                    gameData.currentRoundIndex = 0;
+                    gameData.currentQuestionIndex = 1; 
                 }
 
-                currentUserId = auth.currentUser?.uid || crypto.randomUUID();
                 localUserIdEl.textContent = currentUserId;
-
+                
                 // Handle local player name input logic after auth
                 playerNameInput.addEventListener('input', () => {
-                    if (playerNameInput.value.trim().length > 0 && !gameData.players.some(p => p.id === currentUserId)) {
+                    if (playerNameInput.value.trim().length > 0 && !gameData.players.some(p => p.id === currentUserId) && !isLocalhostWithoutConfig) {
                         addPlayerBtn.disabled = false;
                         addPlayerBtn.classList.remove('opacity-50');
                     } else {
@@ -822,10 +906,10 @@ ame="viewport" content="width=device-width, initial-scale=1.0">
                     }
                 });
 
-                renderGame(); // Initial render to show session view
+                renderGame();
             } catch (error) {
-                console.error("Firebase initialization failed:", error);
-                showStatus(`Initialization failed. Check console for details.`, true);
+                console.error("Initialization failed:", error);
+                showStatus(`Initialization failed. Check console for details. If running locally, ensure Firebase config is correct.`, true);
             }
         }
 
